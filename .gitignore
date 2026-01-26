@@ -1,0 +1,17 @@
+backend/node_modules/
+backend/.env
+backend/.env.local
+backend/logs/*.log
+backend/dist/
+flutter_app/.dart_tool/
+flutter_app/.flutter-plugins
+flutter_app/.packages
+flutter_app/build/
+flutter_app/.metadata
+flutter_app/pubspec.lock
+.idea/
+.vscode/
+.DS_Store
+*.db
+*.env
+!.env.example
