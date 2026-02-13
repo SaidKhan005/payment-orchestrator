@@ -25,10 +25,17 @@ class MockGatewayClient {
 
   /**
    * Simulate payment authorization with configurable failures
+   *
+   * This enhanced version simulates real-world failure scenarios:
+   * - Network timeouts (with or without actual approval)
+   * - Card declines
+   * - Delayed duplicate responses
+   * - Split-brain scenarios (approved but timeout before response)
    */
   async authorize({ amount, merchantReference, cardDetails }) {
-    // Simulate network latency
-    await this.sleep(this.config.mockLatencyMs);
+    // Simulate network latency (variable)
+    const latency = this.config.mockLatencyMs + (Math.random() * 500);
+    await this.sleep(latency);
 
     // Check if transaction already exists (idempotency check)
     const existing = this.transactions.get(merchantReference);
@@ -37,15 +44,54 @@ class MockGatewayClient {
         merchantReference,
         authId: existing.authId
       });
+
+      // Simulate delayed duplicate response (gateway retry scenario)
+      if (Math.random() < 0.1) {
+        await this.sleep(2000);
+        logger.warn('Simulating delayed duplicate response', { merchantReference });
+      }
+
       return {
         ...existing,
         isRetry: true
       };
     }
 
-    // Simulate random timeout
+    // CRITICAL SCENARIO: Simulate approved-but-timeout (split-brain)
+    // The transaction IS approved on the gateway, but the client times out
+    // before receiving the response. This is the most dangerous scenario.
+    if (Math.random() < this.config.mockTimeoutRate * 0.5) {
+      // Store the transaction (it IS approved)
+      const authId = `AUTH_${this.authIdCounter++}_${Date.now()}`;
+      const transactionId = `TXN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+      const transaction = {
+        authId,
+        transactionId,
+        merchantReference,
+        amount,
+        cardDetails: {
+          ...cardDetails,
+          cardNumber: cardDetails.cardNumber ? `****${cardDetails.cardNumber.slice(-4)}` : '****0000'
+        },
+        status: 'APPROVED',
+        timestamp: new Date().toISOString(),
+        isRetry: false
+      };
+
+      this.transactions.set(merchantReference, transaction);
+
+      // But throw timeout before returning - client never sees the approval
+      logger.warn('Simulating approved-but-timeout (split-brain scenario)', {
+        merchantReference,
+        authId
+      });
+      throw new MockTimeoutError('Gateway timeout (but transaction approved)');
+    }
+
+    // Simulate timeout without approval
     if (Math.random() < this.config.mockTimeoutRate) {
-      logger.warn('Simulating gateway timeout', { merchantReference });
+      logger.warn('Simulating gateway timeout (no approval)', { merchantReference });
       throw new MockTimeoutError('Gateway timeout');
     }
 

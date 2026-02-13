@@ -15,7 +15,6 @@ class SimphonyCheckOperations {
     try {
       const token = await this.authClient.getToken();
       
-      // FIXED: Use the correct STS API endpoint format
       const url = `${this.baseUrl}/checks/${encodeURIComponent(checkRef)}`;
 
       logger.info('Fetching check detail', { checkRef, rvcRef });
@@ -50,24 +49,59 @@ class SimphonyCheckOperations {
   }
 
   /**
-   * Split check by creating a child check with specified items
+   * Split check by creating a NEW child check with specified items
+   * 
+   * In Simphony STS API, "splitting" is done by creating a new check
+   * with the items to be paid separately
    */
   async splitCheck(checkRef, rvcRef, itemRefs, employeeRef) {
     try {
       const token = await this.authClient.getToken();
-      
-      // FIXED: Use the correct STS API endpoint format
-      const url = `${this.baseUrl}/checks/${encodeURIComponent(checkRef)}/split`;
 
+      // First, get the parent check details
+      const parentCheck = await this.getCheckDetail(checkRef, rvcRef);
+
+      // Filter menu items that match the itemRefs we want to split off
+      const itemsToSplit = parentCheck.menuItems.filter(item => 
+        itemRefs.includes(item.menuItemId.toString())
+      );
+
+      if (itemsToSplit.length === 0) {
+        throw new Error('No matching items found to split');
+      }
+
+      // Create payload for NEW check with these items
+      const url = `${this.baseUrl}/checks`;
+      
       const payload = {
-        menuItems: itemRefs,
-        checkEmployeeRef: employeeRef
+        header: {
+          orgShortName: this.config.orgShortName,
+          locRef: this.config.locRef,
+          rvcRef: rvcRef,
+          checkEmployeeRef: employeeRef,
+          orderTypeRef: parentCheck.header.orderTypeRef || 1,
+          guestCount: 1,
+          language: "en-US",
+          isTrainingCheck: false,
+          status: "open"
+        },
+        menuItems: itemsToSplit.map(item => ({
+          menuItemId: item.menuItemId,
+          definitionSequence: item.definitionSequence || 1,
+          name: item.name,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          priceSequence: item.priceSequence || 1,
+          total: item.total,
+          seat: item.seat || 1,
+          surcharge: item.surcharge || 0,
+          condiments: item.condiments || []
+        }))
       };
 
-      logger.info('Splitting check', {
-        checkRef,
-        rvcRef,
-        itemCount: itemRefs.length,
+      logger.info('Creating child check (split operation)', {
+        parentCheck: checkRef,
+        itemCount: itemsToSplit.length,
         employeeRef
       });
 
@@ -83,18 +117,22 @@ class SimphonyCheckOperations {
         timeout: 20000
       });
 
-      const childCheckRef = response.data.childCheckRef;
-      logger.info('Check split successful', {
+      const childCheckRef = response.data.header.checkRef;
+      
+      logger.info('Child check created successfully (split complete)', {
         parentCheck: checkRef,
-        childCheck: childCheckRef
+        childCheck: childCheckRef,
+        childCheckNumber: response.data.header.checkNumber
       });
 
       return {
         childCheckRef,
-        parentCheckRef: response.data.parentCheckRef
+        parentCheckRef: checkRef,
+        childCheckNumber: response.data.header.checkNumber
       };
+
     } catch (error) {
-      logger.error('Failed to split check', {
+      logger.error('Failed to split check (create child check)', {
         checkRef,
         rvcRef,
         itemRefs,
@@ -112,7 +150,6 @@ class SimphonyCheckOperations {
     try {
       const token = await this.authClient.getToken();
       
-      // FIXED: Use the correct STS API endpoint format
       const url = `${this.baseUrl}/checks/${encodeURIComponent(checkRef)}/close`;
 
       logger.info('Closing check', { checkRef, rvcRef });

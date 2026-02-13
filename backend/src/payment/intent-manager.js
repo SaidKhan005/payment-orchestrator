@@ -2,8 +2,131 @@ const { v4: uuidv4 } = require('uuid');
 const logger = require('../utils/logger');
 
 class PaymentIntentManager {
+  /**
+   * Valid state transitions map
+   * Maps current state -> array of allowed next states
+   */
+  static STATE_TRANSITIONS = {
+    'INIT': ['CHECK_SPLITTING', 'FAILED_RETRYABLE'],
+    'CHECK_SPLITTING': ['CHECK_SPLIT', 'FAILED_RETRYABLE'],
+    'CHECK_SPLIT': ['AUTHORIZING', 'FAILED_RETRYABLE'],
+    'AUTHORIZING': ['AUTHORIZED', 'FAILED_RETRYABLE', 'NEEDS_RECONCILIATION'],
+    'AUTHORIZED': ['TENDERING', 'FAILED_RETRYABLE'],
+    'TENDERING': ['TENDERED', 'NEEDS_RECONCILIATION'],
+    'TENDERED': ['CLOSING', 'NEEDS_RECONCILIATION'],
+    'CLOSING': ['CLOSED', 'NEEDS_RECONCILIATION'],
+    'CLOSED': [],
+    'FAILED_RETRYABLE': ['INIT', 'FAILED_FINAL'],
+    'FAILED_FINAL': [],
+    'NEEDS_RECONCILIATION': ['AUTHORIZED', 'TENDERED', 'CLOSED', 'FAILED_FINAL'],
+    'VOIDED': []
+  };
+
   constructor(pool) {
     this.pool = pool;
+  }
+
+  /**
+   * Check if state transition is valid
+   * @param {string} fromState - Current state
+   * @param {string} toState - Desired next state
+   * @returns {boolean} - True if transition is allowed
+   */
+  isValidTransition(fromState, toState) {
+    const allowedTransitions = PaymentIntentManager.STATE_TRANSITIONS[fromState];
+    return allowedTransitions && allowedTransitions.includes(toState);
+  }
+
+  /**
+   * Check if intent is in retryable state
+   * @param {string} state - Current state
+   * @returns {boolean} - True if state allows retry
+   */
+  isRetryable(state) {
+    return state === 'FAILED_RETRYABLE' || state === 'NEEDS_RECONCILIATION';
+  }
+
+  /**
+   * Get next retry state based on current state
+   * @param {string} currentState - Current state
+   * @returns {string|null} - Next state for retry, or null if not retryable
+   */
+  getNextRetryState(currentState) {
+    const retryMap = {
+      'FAILED_RETRYABLE': 'INIT',
+      'NEEDS_RECONCILIATION': 'AUTHORIZED'
+    };
+    return retryMap[currentState] || null;
+  }
+
+  /**
+   * Increment retry count and record error
+   * @param {string} intentId - Payment intent ID
+   * @param {string} errorMessage - Error message to record
+   */
+  async incrementRetryCount(intentId, errorMessage) {
+    try {
+      await this.pool.query(`
+        UPDATE payment_intents
+        SET retry_count = retry_count + 1,
+            last_error = $2,
+            updated_at = NOW()
+        WHERE intent_id = $1
+      `, [intentId, errorMessage]);
+
+      logger.info('Retry count incremented', { intentId });
+    } catch (error) {
+      logger.error('Failed to increment retry count', { intentId, error: error.message });
+    }
+  }
+
+  /**
+   * Get intents that need reconciliation
+   * @param {number} limit - Max number of results
+   * @returns {Array} - Intents needing reconciliation
+   */
+  async getIntentsNeedingReconciliation(limit = 50) {
+    try {
+      const result = await this.pool.query(`
+        SELECT * FROM payment_intents
+        WHERE state = 'NEEDS_RECONCILIATION'
+        ORDER BY updated_at ASC
+        LIMIT $1
+      `, [limit]);
+
+      return result.rows.map(intent => ({
+        ...intent,
+        seat_items: intent.seat_items ? JSON.parse(intent.seat_items) : null
+      }));
+    } catch (error) {
+      logger.error('Failed to get intents needing reconciliation', { error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * Get retryable failed intents
+   * @param {number} limit - Max number of results
+   * @returns {Array} - Retryable failed intents
+   */
+  async getRetryableIntents(limit = 50) {
+    try {
+      const result = await this.pool.query(`
+        SELECT * FROM payment_intents
+        WHERE state = 'FAILED_RETRYABLE'
+          AND retry_count < 3
+        ORDER BY updated_at ASC
+        LIMIT $1
+      `, [limit]);
+
+      return result.rows.map(intent => ({
+        ...intent,
+        seat_items: intent.seat_items ? JSON.parse(intent.seat_items) : null
+      }));
+    } catch (error) {
+      logger.error('Failed to get retryable intents', { error: error.message });
+      throw error;
+    }
   }
 
   /**

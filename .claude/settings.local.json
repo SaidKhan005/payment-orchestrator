@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker ps:*)",
+      "Bash(node test-hardened-system.js:*)",
+      "Bash(docker exec:*)"
+    ]
+  }
+}

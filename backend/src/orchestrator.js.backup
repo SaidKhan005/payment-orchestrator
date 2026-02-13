@@ -421,39 +421,12 @@ class PaymentOrchestrator {
 
   /**
    * Calculate total amount for selected seat items
-   * Handles both detailLines (old format) and menuItems (new format)
    */
   calculateSeatTotal(checkDetail, seatItems) {
     let total = 0;
 
-    // Handle new menuItems format (Simphony STS API)
-    if (checkDetail.menuItems && checkDetail.menuItems.length > 0) {
-      for (const itemRef of seatItems) {
-        // itemRef is menuItemId as string
-        const menuItem = checkDetail.menuItems.find(
-          item => item.menuItemId.toString() === itemRef.toString()
-        );
-
-        if (!menuItem) {
-          throw new Error(`Menu item ${itemRef} not found in check`);
-        }
-
-        total += parseFloat(menuItem.total || 0);
-      }
-
-      // Add proportional tax for these items
-      if (checkDetail.totals && checkDetail.totals.taxTotal) {
-        const subtotalRatio = total / checkDetail.totals.subtotal;
-        const proportionalTax = checkDetail.totals.taxTotal * subtotalRatio;
-        total += proportionalTax;
-      }
-
-      return parseFloat(total.toFixed(2));
-    }
-
-    // Handle old detailLines format (fallback)
     if (!checkDetail.detailLines) {
-      throw new Error('Check has no detail lines or menu items');
+      throw new Error('Check has no detail lines');
     }
 
     for (const itemRef of seatItems) {
