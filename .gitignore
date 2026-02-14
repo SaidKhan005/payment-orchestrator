@@ -1,7 +1,9 @@
+node_modules/
 backend/node_modules/
 backend/.env
 backend/.env.local
-backend/logs/*.log
+backend/logs/
+logs/
 backend/dist/
 flutter_app/.dart_tool/
 flutter_app/.flutter-plugins

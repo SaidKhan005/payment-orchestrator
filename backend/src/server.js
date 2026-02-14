@@ -9,17 +9,21 @@ const logger = require('./utils/logger');
 
 // Import components
 const STSAuthClient = require('./auth/sts-auth');
-const SimphonyCheckOperations = require('./simphony/check-operations');
 const { SimphonyTenderOperations } = require('./simphony/tender-operations');
 const PaymentIntentManager = require('./payment/intent-manager');
 const { MockGatewayClient } = require('./payment/mock-gateway');
+const { ElavonGateway } = require('./payment/elavon-gateway');
+const LockManager = require('./payment/lock-manager');
 const PaymentOrchestrator = require('./orchestrator');
 
 // Import routes
 const createPaymentsRouter = require('./api/routes/payments');
-const createChecksRouter = require('./api/routes/checks');
 const createExceptionsRouter = require('./api/routes/exceptions');
+const createProxyRouter = require('./api/routes/proxy');
 const { apiKeyAuth } = require('./api/middleware/auth');
+
+// Note: checks.js route removed - check-operations.js was deleted
+// The new flow doesn't require check splitting/closing
 
 // Initialize Express app
 const app = express();
@@ -42,8 +46,8 @@ const pool = new Pool({
 // Initialize components
 let orchestrator;
 let intentManager;
-let checkOps;
 let gatewayClient;
+let lockManager;
 
 async function initializeComponents() {
   try {
@@ -57,25 +61,39 @@ async function initializeComponents() {
     const authClient = new STSAuthClient(config.simphony);
     logger.info('STS auth client initialized');
 
-    // Initialize Simphony operations
-    checkOps = new SimphonyCheckOperations(config.simphony, authClient);
+    // Initialize Simphony tender operations
     const tenderOps = new SimphonyTenderOperations(config.simphony, authClient);
-    logger.info('Simphony operations initialized');
+    logger.info('Simphony tender operations initialized');
 
     // Initialize payment intent manager
     intentManager = new PaymentIntentManager(pool);
     logger.info('Payment intent manager initialized');
 
-    // Initialize gateway client
-    gatewayClient = new MockGatewayClient(config.gateway);
-    logger.info(`Gateway client initialized (mode: ${config.gateway.useMock ? 'MOCK' : 'PRODUCTION'})`);
+    // Initialize lock manager
+    lockManager = new LockManager(pool);
+    logger.info('Lock manager initialized');
 
-    // Initialize orchestrator
+    // Initialize gateway client (mock or real Elavon)
+    if (config.gateway.useMock) {
+      gatewayClient = new MockGatewayClient(config.gateway);
+      logger.info('Gateway client initialized (mode: MOCK)');
+    } else if (config.elavon.merchantId) {
+      gatewayClient = new ElavonGateway(config.elavon);
+      logger.info('Gateway client initialized (mode: ELAVON CONVERGE)');
+    } else {
+      // Fallback to mock if no Elavon credentials
+      logger.warn('No Elavon credentials configured, falling back to mock gateway');
+      gatewayClient = new MockGatewayClient(config.gateway);
+      logger.info('Gateway client initialized (mode: MOCK - fallback)');
+    }
+
+    // Initialize orchestrator with new constructor signature
     orchestrator = new PaymentOrchestrator(
-      checkOps,
-      tenderOps,
-      intentManager,
-      gatewayClient
+      pool,              // db
+      gatewayClient,     // gatewayClient
+      tenderOps,         // simphonyTender
+      lockManager,       // lockManager
+      intentManager      // intentManager
     );
     logger.info('Payment orchestrator initialized');
 
@@ -97,18 +115,22 @@ app.get('/health', (req, res) => {
     status: 'healthy',
     timestamp: new Date().toISOString(),
     environment: config.server.env,
-    database: pool.totalCount > 0 ? 'connected' : 'disconnected'
+    database: pool.totalCount > 0 ? 'connected' : 'disconnected',
+    gateway: config.gateway.useMock ? 'mock' : 'elavon'
   });
 });
 
-// API routes (protected with API key auth)
-app.use('/api/payments', apiKeyAuth, (req, res, next) => {
-  const router = createPaymentsRouter(orchestrator, intentManager);
+
+
+// Proxy routes (main payment endpoint - protected with API key auth)
+app.use('/api/proxy', apiKeyAuth, (req, res, next) => {
+  const router = createProxyRouter(orchestrator, intentManager);
   router(req, res, next);
 });
 
-app.use('/api/checks', apiKeyAuth, (req, res, next) => {
-  const router = createChecksRouter(checkOps);
+// Legacy payment routes (for backward compatibility)
+app.use('/api/payments', apiKeyAuth, (req, res, next) => {
+  const router = createPaymentsRouter(orchestrator, intentManager);
   router(req, res, next);
 });
 
@@ -151,6 +173,23 @@ app.post('/api/mock/reset', (req, res) => {
   });
 });
 
+// Locks management endpoint (for debugging)
+app.get('/api/locks', apiKeyAuth, async (req, res) => {
+  try {
+    const locks = await lockManager.getAllLocks();
+    res.json({
+      success: true,
+      count: locks.length,
+      locks
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({
@@ -180,22 +219,29 @@ async function startServer() {
     await initializeComponents();
 
     const port = config.server.port;
+    const gatewayMode = config.gateway.useMock ? 'MOCK' : (config.elavon.merchantId ? 'ELAVON' : 'MOCK');
 
     app.listen(port, () => {
       logger.info(`Payment Orchestrator server started`, {
         port,
         environment: config.server.env,
-        mockGateway: config.gateway.useMock
+        gateway: gatewayMode
       });
 
       console.log(`
-╔═══════════════════════════════════════════════════════╗
-║   Payment Orchestrator - Server Running              ║
-╟───────────────────────────────────────────────────────╢
-║   Port:        ${port}                                    ║
-║   Environment: ${config.server.env.padEnd(35)}║
-║   Gateway:     ${(config.gateway.useMock ? 'MOCK' : 'PRODUCTION').padEnd(35)}║
-╚═══════════════════════════════════════════════════════╝
+╔═══════════════════════════════════════════════════════════╗
+║   Payment Orchestrator - Idempotent Gateway Proxy         ║
+╟───────────────────────────────────────────────────────────╢
+║   Port:        ${String(port).padEnd(42)}║
+║   Environment: ${config.server.env.padEnd(42)}║
+║   Gateway:     ${gatewayMode.padEnd(42)}║
+╟───────────────────────────────────────────────────────────╢
+║   Endpoints:                                              ║
+║   POST /api/proxy/payment     - Process payment           ║
+║   GET  /api/proxy/payment/:id - Query payment status      ║
+║   POST /api/proxy/reconcile   - Reconcile failed payment  ║
+║   GET  /api/proxy/reconciliation-queue - View queue       ║
+╚═══════════════════════════════════════════════════════════╝
       `);
     });
   } catch (error) {

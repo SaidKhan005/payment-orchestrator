@@ -5,85 +5,76 @@ function createPaymentsRouter(orchestrator, intentManager) {
   const router = express.Router();
 
   /**
-   * POST /api/payments/seat
-   * Process a seat payment
+   * POST /api/payments/process
+   * Process a payment using the new atomic gateway + tender flow
+   *
+   * This is an alternative to /api/proxy/payment for clients
+   * that prefer the /api/payments namespace.
    */
-  router.post('/seat', async (req, res) => {
+  router.post('/process', async (req, res) => {
     try {
-      const { masterCheckRef, rvcRef, seatItems, employeeRef } = req.body;
+      const {
+        checkRef,
+        rvcRef,
+        amount,
+        cardToken,
+        merchantReference,
+        tenderMediaRef,
+        description
+      } = req.body;
 
       // Validate required fields
-      if (!masterCheckRef || !rvcRef || !seatItems || !employeeRef) {
+      const missingFields = [];
+      if (!checkRef) missingFields.push('checkRef');
+      if (!rvcRef) missingFields.push('rvcRef');
+      if (!amount) missingFields.push('amount');
+      if (!cardToken) missingFields.push('cardToken');
+      if (!merchantReference) missingFields.push('merchantReference');
+      if (!tenderMediaRef) missingFields.push('tenderMediaRef');
+
+      if (missingFields.length > 0) {
         return res.status(400).json({
           error: 'Bad Request',
-          message: 'Missing required fields: masterCheckRef, rvcRef, seatItems, employeeRef'
+          message: `Missing required fields: ${missingFields.join(', ')}`
         });
       }
 
-      if (!Array.isArray(seatItems) || seatItems.length === 0) {
+      // Amount validation
+      const parsedAmount = parseFloat(amount);
+      if (isNaN(parsedAmount) || parsedAmount <= 0) {
         return res.status(400).json({
           error: 'Bad Request',
-          message: 'seatItems must be a non-empty array'
+          message: 'Amount must be a positive number'
         });
       }
 
-      logger.info('Received seat payment request', {
-        masterCheckRef,
+      logger.info('Received payment request', {
+        checkRef,
         rvcRef,
-        seatItemCount: seatItems.length
+        amount: parsedAmount,
+        merchantReference
       });
 
-      const result = await orchestrator.processSeatPayment(
-        masterCheckRef,
+      const result = await orchestrator.processPayment({
+        checkRef,
         rvcRef,
-        seatItems,
-        employeeRef
-      );
+        amount: parsedAmount,
+        cardToken,
+        merchantReference,
+        tenderMediaRef,
+        description
+      });
 
-      res.status(200).json({
-        success: true,
+      const statusCode = result.success ? 200 : (result.needsReconciliation ? 500 : 400);
+
+      res.status(statusCode).json({
+        success: result.success,
         data: result
       });
     } catch (error) {
-      logger.error('Seat payment request failed', {
+      logger.error('Payment request failed', {
         error: error.message,
         body: req.body
-      });
-
-      res.status(500).json({
-        error: 'Internal Server Error',
-        message: error.message
-      });
-    }
-  });
-
-  /**
-   * POST /api/payments/recover
-   * Recover a stuck payment
-   */
-  router.post('/recover', async (req, res) => {
-    try {
-      const { intentId } = req.body;
-
-      if (!intentId) {
-        return res.status(400).json({
-          error: 'Bad Request',
-          message: 'Missing required field: intentId'
-        });
-      }
-
-      logger.info('Received payment recovery request', { intentId });
-
-      const result = await orchestrator.recoverPayment(intentId);
-
-      res.status(200).json({
-        success: true,
-        data: result
-      });
-    } catch (error) {
-      logger.error('Payment recovery failed', {
-        error: error.message,
-        intentId: req.body.intentId
       });
 
       res.status(500).json({
@@ -150,6 +141,70 @@ function createPaymentsRouter(orchestrator, intentManager) {
 
       res.status(500).json({
         error: 'Internal Server Error',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /api/payments/reconciliation/queue
+   * Get payments needing reconciliation
+   */
+  router.get('/reconciliation/queue', async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit) || 50;
+
+      const intents = await intentManager.getIntentsNeedingReconciliation(limit);
+
+      res.status(200).json({
+        success: true,
+        data: intents,
+        count: intents.length
+      });
+    } catch (error) {
+      logger.error('Failed to get reconciliation queue', {
+        error: error.message
+      });
+
+      res.status(500).json({
+        error: 'Internal Server Error',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * POST /api/payments/:intentId/reconcile
+   * Mark a payment as reconciled
+   */
+  router.post('/:intentId/reconcile', async (req, res) => {
+    try {
+      const { intentId } = req.params;
+      const { resolution } = req.body;
+
+      if (!resolution || !['tender_posted', 'voided'].includes(resolution)) {
+        return res.status(400).json({
+          error: 'Bad Request',
+          message: 'Resolution must be "tender_posted" or "voided"'
+        });
+      }
+
+      const result = await orchestrator.markReconciled(intentId, resolution);
+
+      res.status(200).json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      logger.error('Reconciliation failed', {
+        error: error.message,
+        intentId: req.params.intentId
+      });
+
+      const status = error.message.includes('not found') ? 404 : 400;
+
+      res.status(status).json({
+        error: status === 404 ? 'Not Found' : 'Bad Request',
         message: error.message
       });
     }

@@ -3,7 +3,9 @@
     "allow": [
       "Bash(docker ps:*)",
       "Bash(node test-hardened-system.js:*)",
-      "Bash(docker exec:*)"
+      "Bash(docker exec:*)",
+      "Bash(tree:*)",
+      "Bash(git add:*)"
     ]
   }
 }

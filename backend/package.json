@@ -1,14 +1,22 @@
 {
   "name": "payment-orchestrator-backend",
   "version": "1.0.0",
-  "description": "Payment orchestration backend",
+  "description": "Idempotent payment gateway proxy with atomic gateway + tender posting for Oracle Simphony POS",
   "main": "src/server.js",
+  "author": "Said Kerimov <said@safari-eatertainment.com>",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SaidKhan005/payment-orchestrator.git"
+  },
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "node tests/test-payment-flow.js",
+    "test": "node tests/test-real-check.js",
+    "test:idempotency": "node tests/test-idempotency-real.js",
+    "test:proxy": "node tests/test-proxy-payment.js",
     "db:migrate": "node scripts/migrate.js",
-    "db:seed": "node scripts/seed.js"
+    "db:setup": "node scripts/setup-migrations.js"
   },
   "dependencies": {
     "axios": "^1.6.0",
