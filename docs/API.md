@@ -26,7 +26,7 @@ Check if the server is running and healthy.
 ```json
 {
   "status": "healthy",
-  "timestamp": "2024-01-15T10:30:00.000Z",
+  "timestamp": "2026-02-15T10:30:00.000Z",
   "environment": "development",
   "database": "connected"
 }
@@ -34,80 +34,117 @@ Check if the server is running and healthy.
 
 ---
 
+### Proxy Payment (Primary Endpoint)
+
+#### Process Payment via Proxy
+
+**POST** `/api/proxy/payment`
+
+Drop-in payment proxy with idempotency. This is the main endpoint for payment terminals and Ethor handhelds.
+
+**Request Body:**
+```json
+{
+  "intentId": "550e8400-e29b-41d4-a716-446655440000",
+  "checkRef": "9a557a26fc56468c9ebc3359849380c400000646",
+  "amount": 5000,
+  "currency": "USD",
+  "paymentToken": "tok_xxxx",
+  "employeeId": 51
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `intentId` | UUID | Yes | Stable idempotency key — same value on retry |
+| `checkRef` | string | Yes | Simphony check reference |
+| `amount` | integer | Yes | Amount in cents |
+| `currency` | string | No | Default: USD |
+| `paymentToken` | string | Yes | Tokenized card data (raw card numbers rejected) |
+| `employeeId` | integer | No | Default: 51 |
+
+**Response (success):**
+```json
+{
+  "success": true,
+  "intentId": "550e8400-e29b-41d4-a716-446655440000",
+  "authId": "AUTH_1_1770987616260",
+  "transactionId": "TXN_1770987616260_abc123",
+  "state": "AUTHORIZED",
+  "amount": 5000,
+  "idempotent": false,
+  "timestamp": "2026-02-15T10:30:00.000Z"
+}
+```
+
+**Response (duplicate — idempotent cache hit):**
+```json
+{
+  "success": true,
+  "intentId": "550e8400-e29b-41d4-a716-446655440000",
+  "authId": "AUTH_1_1770987616260",
+  "transactionId": "TXN_1770987616260_abc123",
+  "state": "AUTHORIZED",
+  "amount": 5000,
+  "idempotent": true,
+  "cachedAt": "2026-02-15T10:30:00.000Z"
+}
+```
+
+**Response (declined):**
+```json
+{
+  "success": false,
+  "state": "DECLINED",
+  "error": "Card declined",
+  "canRetry": false
+}
+```
+
+**Response (split-brain — needs reconciliation):**
+```json
+{
+  "success": false,
+  "state": "NEEDS_RECONCILIATION",
+  "intentId": "550e8400-e29b-41d4-a716-446655440000",
+  "authId": "AUTH_1_1770987616260",
+  "error": "Gateway approved but tender posting failed",
+  "canRetry": false,
+  "actionRequired": "Manual reconciliation — check reconciliation queue"
+}
+```
+
+---
+
+#### Get Reconciliation Queue
+
+**GET** `/api/proxy/reconciliation-queue`
+
+Get all payments in `NEEDS_RECONCILIATION` state requiring manual review.
+
+**Response:**
+```json
+{
+  "success": true,
+  "count": 2,
+  "data": [
+    {
+      "intentId": "550e8400-e29b-41d4-a716-446655440000",
+      "checkRef": "9a557a26...",
+      "amount": 5000,
+      "authId": "AUTH_1_xxx",
+      "error": "Simphony tender timeout",
+      "createdAt": "2026-02-15T10:30:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
 ### Payments
 
-#### Process Seat Payment
-
-**POST** `/api/payments/seat`
-
-Process a payment for specific seat items on a check. This is the main payment flow that:
-1. Splits the check in Simphony
-2. Authorizes payment with the gateway
-3. Posts tender to Simphony
-4. Closes the child check
-
-**Request Body:**
-```json
-{
-  "masterCheckRef": "12345",
-  "rvcRef": 1,
-  "seatItems": [1, 2, 3],
-  "employeeRef": "EMP001"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "intentId": "550e8400-e29b-41d4-a716-446655440000",
-    "childCheckRef": "12345-1",
-    "authId": "AUTH_1234567890",
-    "amount": 45.50,
-    "state": "CLOSED"
-  }
-}
-```
-
-**Error Response:**
-```json
-{
-  "error": "Internal Server Error",
-  "message": "Failed to split check 12345: Check not found"
-}
-```
-
----
-
-#### Recover Payment
-
-**POST** `/api/payments/recover`
-
-Recover a stuck or failed payment by idempotently retrying from the last successful state.
-
-**Request Body:**
-```json
-{
-  "intentId": "550e8400-e29b-41d4-a716-446655440000"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "intentId": "550e8400-e29b-41d4-a716-446655440000",
-    "state": "CLOSED",
-    "recovered": true
-  }
-}
-```
-
----
-
-#### Get Payment Intent
+#### Get Payment Status
 
 **GET** `/api/payments/:intentId`
 
@@ -119,17 +156,14 @@ Retrieve details of a specific payment intent.
   "success": true,
   "data": {
     "intent_id": "550e8400-e29b-41d4-a716-446655440000",
-    "master_check_ref": "12345",
-    "child_check_ref": "12345-1",
-    "rvc_ref": 1,
-    "amount": "45.50",
-    "state": "CLOSED",
-    "auth_id": "AUTH_1234567890",
-    "gateway_reference": "TXN_1234567890",
-    "seat_items": [1, 2, 3],
-    "employee_ref": "EMP001",
-    "created_at": "2024-01-15T10:30:00.000Z",
-    "updated_at": "2024-01-15T10:30:15.000Z"
+    "check_ref": "9a557a26...",
+    "amount": "50.00",
+    "state": "AUTHORIZED",
+    "auth_id": "AUTH_1_1770987616260",
+    "gateway_reference": "TXN_1770987616260_abc123",
+    "employee_id": 51,
+    "created_at": "2026-02-15T10:30:00.000Z",
+    "updated_at": "2026-02-15T10:30:15.000Z"
   }
 }
 ```
@@ -144,11 +178,11 @@ List payment intents with optional filters.
 
 **Query Parameters:**
 - `limit` (optional): Number of intents to return (default: 50)
-- `state` (optional): Filter by state (INIT, CHECK_SPLIT, AUTHORIZED, TENDERED, CLOSED, FAILED, VOIDED)
+- `state` (optional): Filter by state
 
 **Example:**
 ```
-GET /api/payments?limit=20&state=FAILED
+GET /api/payments?limit=20&state=NEEDS_RECONCILIATION
 ```
 
 **Response:**
@@ -158,51 +192,13 @@ GET /api/payments?limit=20&state=FAILED
   "data": [
     {
       "intent_id": "550e8400-e29b-41d4-a716-446655440000",
-      "master_check_ref": "12345",
-      "state": "CLOSED",
-      "amount": "45.50",
-      "created_at": "2024-01-15T10:30:00.000Z",
-      ...
+      "check_ref": "9a557a26...",
+      "state": "AUTHORIZED",
+      "amount": "50.00",
+      "created_at": "2026-02-15T10:30:00.000Z"
     }
   ],
   "count": 1
-}
-```
-
----
-
-### Checks
-
-#### Get Check Detail
-
-**GET** `/api/checks/:checkRef`
-
-Retrieve check details from Simphony.
-
-**Query Parameters:**
-- `rvcRef` (required): Revenue center reference
-
-**Example:**
-```
-GET /api/checks/12345?rvcRef=1
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "checkRef": "12345",
-    "checkNumber": 12345,
-    "totalAmount": 123.45,
-    "detailLines": [
-      {
-        "detailLineRef": 1,
-        "menuItemName": "Burger",
-        "totalAmount": 12.99
-      }
-    ]
-  }
 }
 ```
 
@@ -220,11 +216,6 @@ Get payment exceptions for monitoring and troubleshooting.
 - `resolved` (optional): Filter by resolution status (default: false)
 - `limit` (optional): Number of exceptions to return (default: 50)
 
-**Example:**
-```
-GET /api/exceptions?resolved=false&limit=20
-```
-
 **Response:**
 ```json
 {
@@ -236,9 +227,8 @@ GET /api/exceptions?resolved=false&limit=20
       "exception_type": "TENDER_TIMEOUT",
       "severity": "WARNING",
       "message": "Timeout posting tender to Simphony",
-      "stack_trace": "Error: Timeout...",
       "resolved": false,
-      "created_at": "2024-01-15T10:30:00.000Z"
+      "created_at": "2026-02-15T10:30:00.000Z"
     }
   ],
   "count": 1
@@ -249,11 +239,11 @@ GET /api/exceptions?resolved=false&limit=20
 
 ### Mock Gateway (Development Only)
 
+> **Note:** Only available when `MOCK_GATEWAY=true` in environment.
+
 #### Get All Transactions
 
 **GET** `/api/mock/transactions`
-
-Get all transactions stored in the mock gateway. Only available when `USE_MOCK_GATEWAY=true`.
 
 **Response:**
 ```json
@@ -264,22 +254,20 @@ Get all transactions stored in the mock gateway. Only available when `USE_MOCK_G
       "authId": "AUTH_1_1234567890",
       "transactionId": "TXN_1234567890_abc123",
       "merchantReference": "550e8400-e29b-41d4-a716-446655440000",
-      "amount": 45.50,
+      "amount": 5000,
       "status": "APPROVED",
-      "timestamp": "2024-01-15T10:30:00.000Z"
+      "timestamp": "2026-02-15T10:30:00.000Z"
     }
   ],
   "count": 1
 }
 ```
 
----
-
 #### Reset Mock Gateway
 
 **POST** `/api/mock/reset`
 
-Clear all transactions from the mock gateway. Only available when `USE_MOCK_GATEWAY=true`.
+Clear all transactions from the mock gateway.
 
 **Response:**
 ```json
@@ -293,45 +281,54 @@ Clear all transactions from the mock gateway. Only available when `USE_MOCK_GATE
 
 ## Payment States
 
-Payment intents progress through the following states:
-
-1. **INIT** - Intent created, ready to process
-2. **CHECK_SPLIT** - Child check created in Simphony
-3. **AUTHORIZED** - Payment authorized by gateway
-4. **TENDERED** - Tender posted to Simphony
-5. **CLOSED** - Child check closed, payment complete
-6. **FAILED** - Payment failed (can be recovered)
-7. **VOIDED** - Payment voided
-
----
-
-## Error Codes
-
-- **400 Bad Request** - Missing or invalid parameters
-- **401 Unauthorized** - Invalid or missing API key
-- **404 Not Found** - Resource not found
-- **500 Internal Server Error** - Server error, check logs
+| State | Meaning |
+|-------|---------|
+| `INIT` | Payment record created |
+| `AUTHORIZING` | Gateway request in flight |
+| `AUTHORIZED` | Gateway approved, tender posted |
+| `TENDERING` | Simphony tender request in flight |
+| `COMPLETED` | Full success |
+| `DECLINED` | Gateway declined |
+| `TENDER_FAILED` | Gateway approved, Simphony failed |
+| `NEEDS_RECONCILIATION` | Split-brain — requires manual review |
+| `FAILED_RETRYABLE` | Network error — safe to retry |
+| `FAILED_FINAL` | Validation error — manual intervention needed |
 
 ---
 
-## Rate Limiting
+## Error Responses
 
-No rate limiting is currently implemented. In production, consider implementing rate limiting based on API key.
+| Code | Meaning |
+|------|---------|
+| 400 | Bad request — missing or invalid parameters |
+| 401 | Unauthorized — invalid or missing API key |
+| 404 | Not found — intentId does not exist |
+| 409 | Conflict — payment already in terminal state |
+| 503 | Service unavailable — gateway or Simphony timeout |
 
 ---
 
 ## Idempotency
 
-The payment system is idempotent:
-- Using the same `intentId` as `merchantReference` ensures duplicate authorizations are detected
-- Recovery endpoint can be called multiple times safely
-- Gateway queries prevent double-charging
+The payment system is idempotent by design:
+
+- Use the same `intentId` for retries — the proxy returns the cached result
+- Gateway is NOT called again on retry
+- The `idempotent: true` flag in the response indicates a cache hit
+- Safe to retry on network timeout — no duplicate charges
 
 ---
 
-## Webhooks
+## PCI Compliance
 
-Webhooks are not currently implemented. Consider adding webhook support for:
-- Payment state changes
-- Exception creation
-- Check closure events
+Raw card numbers are rejected at the API level:
+
+```
+POST /api/proxy/payment
+{ "cardNumber": "4111111111111111" }
+
+→ 400 Bad Request
+  { "error": "Raw card data not allowed. Use paymentToken only." }
+```
+
+Only tokenized payment references (`paymentToken`) are accepted and stored.

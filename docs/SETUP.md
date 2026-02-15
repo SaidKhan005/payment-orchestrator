@@ -81,8 +81,8 @@ createdb payment_orchestrator
 # Run migrations
 npm run db:migrate
 
-# Seed test data (optional)
-npm run db:seed
+# Setup migrations (first time only)
+node scripts/setup-migrations.js
 ```
 
 #### Start Backend
@@ -259,14 +259,17 @@ API_KEY=production_api_key
 ```bash
 cd backend
 
-# Run test suite
+# Run main test suite
 npm test
 
-# Test specific flow
-node tests/test-payment-flow.js
+# Test idempotency specifically
+npm run test:idempotency
+
+# Test proxy payment flow
+npm run test:proxy
 ```
 
-### Flutter Tests
+### Flutter Tests (Monitoring App)
 
 ```bash
 cd flutter_app

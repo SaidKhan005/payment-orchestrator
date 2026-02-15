@@ -259,8 +259,11 @@ The system tracks:
 
 | Document | Description |
 |----------|-------------|
+| [docs/ETHOR_PARTNERSHIP_EXECUTIVE.md](docs/ETHOR_PARTNERSHIP_EXECUTIVE.md) | Ethor partnership business case and proposal |
+| [docs/ETHOR_PARTNERSHIP_TECHNICAL.md](docs/ETHOR_PARTNERSHIP_TECHNICAL.md) | Ethor integration technical requirements |
+| [docs/ETHOR_PARTNERSHIP_SOLUTION.md](docs/ETHOR_PARTNERSHIP_SOLUTION.md) | Solution details and Safari validation results |
+| [docs/EXECUTIVE_SUMMARY.md](docs/EXECUTIVE_SUMMARY.md) | Executive summary and ROI |
 | [docs/ETHOR_ANALYSIS.md](docs/ETHOR_ANALYSIS.md) | Technical deep dive on the duplicate charge problem |
-| [docs/EXECUTIVE_SUMMARY.md](docs/EXECUTIVE_SUMMARY.md) | Business case and ROI analysis |
 | [docs/ETHOR_VS_PROXY.md](docs/ETHOR_VS_PROXY.md) | Architecture comparison |
 | [backend/tests/README.md](backend/tests/README.md) | Test suite documentation |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
@@ -283,11 +286,7 @@ The system tracks:
 - [ ] Enhanced monitoring dashboard
 - [ ] Automated reconciliation workflows
 
-### v2.0.0 (Future — Q2 2026)
-- [ ] Toast POS integration
-- [ ] Square POS integration
-- [ ] Multi-tenant architecture
-- [ ] REST API SDK for POS vendors
+*Phase 2 standalone SaaS planning (multi-POS, multi-tenant) documented separately — see [docs/phase2/STRATEGY.md](docs/phase2/STRATEGY.md)*
 
 ---
 
@@ -314,10 +313,10 @@ See [LICENSE](LICENSE) for details.
 
 ## Author
 
-**Said Kerimov**
+**Said Khan**
 Technology Officer & GM, Safari Eatertainment
 Founder, Forge & Flow Consulting
-Email: said@safari-eatertainment.com
+Email: said@junglejims.ca
 
 ---
 

@@ -7,17 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned for v1.1.0
+### Planned for v1.1.0 — Ethor Integration
 - Real Elavon Converge gateway integration (sandbox credentials pending)
-- Multi-location credential management
+- Ethor handheld API compatibility validation
+- Multi-location credential management (per Ethor customer)
 - Automated reconciliation workflows
 - Enhanced monitoring dashboard
 
-### Planned for v2.0.0
-- Toast POS integration
-- Square POS integration
-- Multi-tenant architecture
-- REST API SDK for POS vendors
+*Phase 2 standalone SaaS planning (multi-POS, multi-tenant) documented separately — see [docs/phase2/STRATEGY.md](docs/phase2/STRATEGY.md)*
 
 ---
 

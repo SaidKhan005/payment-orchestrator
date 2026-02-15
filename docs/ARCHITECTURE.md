@@ -43,8 +43,8 @@ Handles HTTP requests and responses.
 
 **Components:**
 - **Routes:**
-  - `payments.js` - Payment operations (seat payment, recovery, listing)
-  - `checks.js` - Check queries from Simphony
+  - `payments.js` - Payment operations (process, status, listing)
+  - `proxy.js` - Drop-in payment proxy endpoint
   - `exceptions.js` - Exception monitoring
 
 - **Middleware:**
@@ -101,12 +101,6 @@ Idempotent recovery flow:
 **Location:** `backend/src/simphony/`
 
 Handles all interactions with Oracle Simphony POS via the STS API.
-
-#### Check Operations (`check-operations.js`)
-
-- **getCheckDetail(checkRef, rvcRef)** - Fetch check information
-- **splitCheck(checkRef, rvcRef, itemRefs, employeeRef)** - Create child check
-- **closeCheck(checkRef, rvcRef)** - Finalize check
 
 #### Tender Operations (`tender-operations.js`)
 
@@ -400,20 +394,16 @@ CLOSED ──► VOIDED (refund scenario)
 
 ---
 
-## Scalability Considerations
+## Deployment Model
 
-### Current Limitations
-- In-memory locking (single instance only)
-- No horizontal scaling support
-- Synchronous processing only
+This system is designed for **single-tenant deployment** — one instance per restaurant group.
 
-### Future Improvements
-- **Distributed Locks** - Use Redis for multi-instance locking
-- **Message Queue** - Async processing with RabbitMQ/Redis
-- **Database Sharding** - Partition by location/organization
-- **Caching** - Redis cache for check details
-- **Load Balancing** - Multiple backend instances
-- **Monitoring** - Prometheus metrics, Grafana dashboards
+Current architecture supports:
+- Single PostgreSQL instance per deployment
+- Single Node.js process (or PM2 cluster on one host)
+- Per-location Simphony credentials via environment variables
+
+*Multi-tenant, multi-POS scalability plans are documented separately — see [phase2/TECHNICAL_REQUIREMENTS.md](phase2/TECHNICAL_REQUIREMENTS.md)*
 
 ---
 
